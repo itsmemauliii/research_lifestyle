@@ -37,12 +37,10 @@ if uploaded_file is not None:
     rested_options = get_options("Do you feel rested after waking up?")
     screens_before_bed_options = get_options("Do you use screens before bed?")
     exercise_options = get_options("How often do you exercise in a week?")
-    activity_options = get_options("What kind of physical activity do you engage in?")
     home_cooked_options = get_options("Do you eat home-cooked meals most of the time?")
     water_options = get_options("How many glasses of water do you drink per day?")
     screen_time_options = get_options("How many hours do you spend on screen daily (excluding work/study)?")
     multitask_options = get_options("Do you often multitask on devices?")
-    selfcare_options = get_options("Do you follow any self-care practices?")
 
     # =======================
     # 3. Preprocessing
@@ -80,9 +78,9 @@ if uploaded_file is not None:
     }
 
     cluster_descriptions = {
-        0: "🟢 **Cluster 0:** High Stress & Poor Sleep - Often feel overworked, use screens before bed, may lack rest.",
-        1: "🔵 **Cluster 1:** Balanced Lifestyle -  Manage stress well, sleep consistently, engage in healthy routines.",
-        2: "🟠 **Cluster 2:** Moderate Issues / Screen-Heavy - Exercise sometimes, but spend long hours on screens and multitasking."
+        0: "🟢 **Cluster 0:** High Stress & Poor Sleep — Often feel overworked, use screens before bed, may lack rest.",
+        1: "🔵 **Cluster 1:** Balanced Lifestyle — Manage stress well, sleep consistently, engage in healthy routines.",
+        2: "🟠 **Cluster 2:** Moderate Issues / Screen-Heavy — Exercise sometimes, but spend long hours on screens and multitasking."
     }
 
     # =======================
@@ -90,24 +88,29 @@ if uploaded_file is not None:
     # =======================
     st.header("📋 Lifestyle Questionnaire")
 
+    # Numeric features: sliders
+    stress = st.slider("Stress due to work? (1=Low, 5=High)", 1, 5, 3)
+    control_time = st.slider("Control over time (1=Low, 5=High)", 1, 5, 3)
+    consistent_sleep = st.slider("Consistency of sleep (1=Low, 5=High)", 1, 5, 3)
+    breaks = st.slider("Breaks from screen (1=Low, 5=High)", 1, 5, 3)
+
+    # Categorical features: radio from dataset options
     age = st.radio("Age Group:", age_options)
     gender = st.radio("Gender:", gender_options)
-    stress = st.slider("Stress due to work? (1=Low, 5=High)", 1, 5, 3)
     overwhelmed = st.radio("How often do you feel overwhelmed?", overwhelmed_options)
     enjoy_job = st.radio("Do you enjoy your current job/study environment?", enjoy_job_options)
-    control_time = st.slider("Control over time (1=Low, 5=High)", 1, 5, 3)
     sleep_hours = st.radio("Average sleep hours:", sleep_hours_options)
     rested = st.radio("Do you feel rested after waking up?", rested_options)
-    consistent_sleep = st.slider("Consistency of sleep (1=Low, 5=High)", 1, 5, 3)
     screens_before_bed = st.radio("Do you use screens before bed?", screens_before_bed_options)
     exercise = st.radio("Exercise frequency:", exercise_options)
-    physical_activity = st.radio("Physical activity:", activity_options)
     home_cooked = st.radio("Eat home-cooked meals?", home_cooked_options)
     water = st.radio("Water intake per day:", water_options)
     screen_time = st.radio("Daily screen time (excluding work/study):", screen_time_options)
     multitask = st.radio("Do you often multitask on devices?", multitask_options)
-    breaks = st.slider("Breaks from screen (1=Low, 5=High)", 1, 5, 3)
-    self_care = st.radio("Self-care practices:", selfcare_options)
+
+    # Text input fields for flexibility
+    physical_activity = st.text_input("What kind of physical activity do you engage in? (e.g., Walk, Yoga, Cycling)")
+    self_care = st.text_input("Do you follow any self-care practices? (e.g., Meditation, Journaling, None)")
 
     # =======================
     # 5. Prediction
@@ -136,7 +139,7 @@ if uploaded_file is not None:
 
         user_df = pd.DataFrame(user_dict)
 
-        # Only encode categorical
+        # Only encode categorical (leave numeric untouched)
         for col in categorical_cols:
             if col in user_df.columns and user_df[col].dtype == "object":
                 user_df[col] = encoder.fit_transform(user_df[col])
@@ -182,5 +185,6 @@ if uploaded_file is not None:
     st.subheader("🔍 Cluster Descriptions")
     for cid, desc in cluster_descriptions.items():
         st.markdown(desc)
+
 else:
     st.warning("⚠️ Please upload a dataset CSV to continue.")
