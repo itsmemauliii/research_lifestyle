@@ -25,31 +25,24 @@ if uploaded_file is not None:
     # Drop irrelevant columns
     data = df.drop(columns=["Timestamp", "Score", "Country"], errors="ignore")
 
-    # Get categorical options dynamically
-    def get_options(col):
-        return sorted(df[col].dropna().unique().tolist()) if col in df.columns else []
-
-    age_options = get_options("Age")
-    gender_options = get_options("Gender")
-    overwhelmed_options = get_options("How often do you feel overwhelmed in a week?")
-    enjoy_job_options = get_options("Do you enjoy your current job/study environment?")
-    sleep_hours_options = get_options("How many hours do you sleep on average?")
-    rested_options = get_options("Do you feel rested after waking up?")
-    screens_before_bed_options = get_options("Do you use screens before bed?")
-    exercise_options = get_options("How often do you exercise in a week?")
-    home_cooked_options = get_options("Do you eat home-cooked meals most of the time?")
-    water_options = get_options("How many glasses of water do you drink per day?")
-    screen_time_options = get_options("How many hours do you spend on screen daily (excluding work/study)?")
-    multitask_options = get_options("Do you often multitask on devices?")
-
     # =======================
-    # 3. Preprocessing
+    # 3. Explicitly define numeric & categorical
     # =======================
-    categorical_cols = data.select_dtypes(include="object").columns
+    numeric_cols = [
+        "How stressed do you feel due to work?",
+        "On a scale of 1–5, how much control do you feel over your time?",
+        "How consistent is your sleep schedule?",
+        "How often do you take breaks from screen?"
+    ]
+
+    categorical_cols = [col for col in data.columns if col not in numeric_cols]
+
+    # Encode categoricals
     encoder = LabelEncoder()
     for col in categorical_cols:
-        data[col] = encoder.fit_transform(data[col])
+        data[col] = encoder.fit_transform(data[col].astype(str))
 
+    # Scale
     scaler = StandardScaler()
     scaled_data = scaler.fit_transform(data)
 
@@ -78,9 +71,9 @@ if uploaded_file is not None:
     }
 
     cluster_descriptions = {
-        0: "🟢 **Cluster 0:** High Stress & Poor Sleep — Often feel overworked, use screens before bed, may lack rest.",
-        1: "🔵 **Cluster 1:** Balanced Lifestyle — Manage stress well, sleep consistently, engage in healthy routines.",
-        2: "🟠 **Cluster 2:** Moderate Issues / Screen-Heavy — Exercise sometimes, but spend long hours on screens and multitasking."
+        0: "🟢 **Cluster 0:** High Stress & Poor Sleep - Often feel overworked, use screens before bed, may lack rest.",
+        1: "🔵 **Cluster 1:** Balanced Lifestyle - Manage stress well, sleep consistently, engage in healthy routines.",
+        2: "🟠 **Cluster 2:** Moderate Issues / Screen-Heavy - Exercise sometimes, but spend long hours on screens and multitasking."
     }
 
     # =======================
@@ -94,19 +87,22 @@ if uploaded_file is not None:
     consistent_sleep = st.slider("Consistency of sleep (1=Low, 5=High)", 1, 5, 3)
     breaks = st.slider("Breaks from screen (1=Low, 5=High)", 1, 5, 3)
 
-    # Categorical features: radio from dataset options
-    age = st.radio("Age Group:", age_options)
-    gender = st.radio("Gender:", gender_options)
-    overwhelmed = st.radio("How often do you feel overwhelmed?", overwhelmed_options)
-    enjoy_job = st.radio("Do you enjoy your current job/study environment?", enjoy_job_options)
-    sleep_hours = st.radio("Average sleep hours:", sleep_hours_options)
-    rested = st.radio("Do you feel rested after waking up?", rested_options)
-    screens_before_bed = st.radio("Do you use screens before bed?", screens_before_bed_options)
-    exercise = st.radio("Exercise frequency:", exercise_options)
-    home_cooked = st.radio("Eat home-cooked meals?", home_cooked_options)
-    water = st.radio("Water intake per day:", water_options)
-    screen_time = st.radio("Daily screen time (excluding work/study):", screen_time_options)
-    multitask = st.radio("Do you often multitask on devices?", multitask_options)
+    # Extract options from dataset for consistency
+    def get_options(col):
+        return sorted(df[col].dropna().unique().tolist()) if col in df.columns else []
+
+    age = st.radio("Age Group:", get_options("Age"))
+    gender = st.radio("Gender:", get_options("Gender"))
+    overwhelmed = st.radio("How often do you feel overwhelmed?", get_options("How often do you feel overwhelmed in a week?"))
+    enjoy_job = st.radio("Do you enjoy your current job/study environment?", get_options("Do you enjoy your current job/study environment?"))
+    sleep_hours = st.radio("Average sleep hours:", get_options("How many hours do you sleep on average?"))
+    rested = st.radio("Do you feel rested after waking up?", get_options("Do you feel rested after waking up?"))
+    screens_before_bed = st.radio("Do you use screens before bed?", get_options("Do you use screens before bed?"))
+    exercise = st.radio("Exercise frequency:", get_options("How often do you exercise in a week?"))
+    home_cooked = st.radio("Eat home-cooked meals?", get_options("Do you eat home-cooked meals most of the time?"))
+    water = st.radio("Water intake per day:", get_options("How many glasses of water do you drink per day?"))
+    screen_time = st.radio("Daily screen time (excluding work/study):", get_options("How many hours do you spend on screen daily (excluding work/study)?"))
+    multitask = st.radio("Do you often multitask on devices?", get_options("Do you often multitask on devices?"))
 
     # Text input fields for flexibility
     physical_activity = st.text_input("What kind of physical activity do you engage in? (e.g., Walk, Yoga, Cycling)")
@@ -139,10 +135,10 @@ if uploaded_file is not None:
 
         user_df = pd.DataFrame(user_dict)
 
-        # Only encode categorical (leave numeric untouched)
+        # Encode categoricals only (leave numeric slider cols untouched)
         for col in categorical_cols:
-            if col in user_df.columns and user_df[col].dtype == "object":
-                user_df[col] = encoder.fit_transform(user_df[col])
+            if col in user_df.columns:
+                user_df[col] = encoder.fit_transform(user_df[col].astype(str))
 
         # Scale
         user_scaled = scaler.transform(user_df)
@@ -188,3 +184,4 @@ if uploaded_file is not None:
 
 else:
     st.warning("⚠️ Please upload a dataset CSV to continue.")
+
