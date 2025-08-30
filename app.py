@@ -6,13 +6,16 @@ from sklearn.preprocessing import LabelEncoder, StandardScaler
 from sklearn.cluster import KMeans
 
 # =======================
-# 1. File Upload
+# 1. Streamlit Setup
 # =======================
 st.set_page_config(page_title="Lifestyle Mental Health Recommender", layout="wide")
 
 st.title("🧠 Lifestyle-Based Mental Health Recommender System")
-st.write("Upload your survey dataset and answer the questions below to get recommendations.")
+st.write("Upload your survey dataset and answer the questions below to get personalized recommendations.")
 
+# =======================
+# 2. File Upload
+# =======================
 uploaded_file = st.file_uploader("📂 Upload your Lifestyle & Wellness Survey CSV", type=["csv"])
 
 if uploaded_file is not None:
@@ -22,24 +25,42 @@ if uploaded_file is not None:
     # Drop irrelevant columns
     data = df.drop(columns=["Timestamp", "Score", "Country"], errors="ignore")
 
-    # Encode categorical columns
+    # Get categorical options dynamically
+    def get_options(col):
+        return sorted(df[col].dropna().unique().tolist()) if col in df.columns else []
+
+    age_options = get_options("Age")
+    gender_options = get_options("Gender")
+    overwhelmed_options = get_options("How often do you feel overwhelmed in a week?")
+    enjoy_job_options = get_options("Do you enjoy your current job/study environment?")
+    sleep_hours_options = get_options("How many hours do you sleep on average?")
+    rested_options = get_options("Do you feel rested after waking up?")
+    screens_before_bed_options = get_options("Do you use screens before bed?")
+    exercise_options = get_options("How often do you exercise in a week?")
+    activity_options = get_options("What kind of physical activity do you engage in?")
+    home_cooked_options = get_options("Do you eat home-cooked meals most of the time?")
+    water_options = get_options("How many glasses of water do you drink per day?")
+    screen_time_options = get_options("How many hours do you spend on screen daily (excluding work/study)?")
+    multitask_options = get_options("Do you often multitask on devices?")
+    selfcare_options = get_options("Do you follow any self-care practices?")
+
+    # =======================
+    # 3. Preprocessing
+    # =======================
     categorical_cols = data.select_dtypes(include="object").columns
     encoder = LabelEncoder()
     for col in categorical_cols:
         data[col] = encoder.fit_transform(data[col])
 
-    # Scale data
     scaler = StandardScaler()
     scaled_data = scaler.fit_transform(data)
 
-    # Train KMeans
+    # KMeans
     kmeans_final = KMeans(n_clusters=3, random_state=42)
     clusters = kmeans_final.fit_predict(scaled_data)
     df["Cluster"] = clusters
 
-    # =======================
-    # 2. Recommendation Rules
-    # =======================
+    # Recommendations
     recommendations = {
         0: [
             "High stress levels detected: Try meditation and relaxation techniques.",
@@ -59,37 +80,37 @@ if uploaded_file is not None:
     }
 
     cluster_descriptions = {
-        0: "🟢 **Cluster 0:** High Stress & Poor Sleep — Often feel overworked, use screens before bed, may lack rest.",
-        1: "🔵 **Cluster 1:** Balanced Lifestyle — Manage stress well, sleep consistently, engage in healthy routines.",
-        2: "🟠 **Cluster 2:** Moderate Issues / Screen-Heavy — Exercise sometimes, but spend long hours on screens and multitasking."
+        0: "🟢 **Cluster 0:** High Stress & Poor Sleep - Often feel overworked, use screens before bed, may lack rest.",
+        1: "🔵 **Cluster 1:** Balanced Lifestyle -  Manage stress well, sleep consistently, engage in healthy routines.",
+        2: "🟠 **Cluster 2:** Moderate Issues / Screen-Heavy - Exercise sometimes, but spend long hours on screens and multitasking."
     }
 
     # =======================
-    # 3. User Inputs
+    # 4. User Input Form
     # =======================
     st.header("📋 Lifestyle Questionnaire")
 
-    age = st.selectbox("Age Group:", ["18-28", "29-38", "39-48", "49+"])
-    gender = st.selectbox("Gender:", ["Male", "Female", "Other"])
+    age = st.radio("Age Group:", age_options)
+    gender = st.radio("Gender:", gender_options)
     stress = st.slider("Stress due to work? (1=Low, 5=High)", 1, 5, 3)
-    overwhelmed = st.selectbox("How often do you feel overwhelmed?", ["Never", "Rarely", "Sometimes", "Often"])
-    enjoy_job = st.radio("Do you enjoy your current job/study environment?", ["Yes", "No"])
+    overwhelmed = st.radio("How often do you feel overwhelmed?", overwhelmed_options)
+    enjoy_job = st.radio("Do you enjoy your current job/study environment?", enjoy_job_options)
     control_time = st.slider("Control over time (1=Low, 5=High)", 1, 5, 3)
-    sleep_hours = st.selectbox("Average sleep hours:", ["4-5", "6-7", "8+"])
-    rested = st.radio("Do you feel rested after waking up?", ["Yes", "No"])
+    sleep_hours = st.radio("Average sleep hours:", sleep_hours_options)
+    rested = st.radio("Do you feel rested after waking up?", rested_options)
     consistent_sleep = st.slider("Consistency of sleep (1=Low, 5=High)", 1, 5, 3)
-    screens_before_bed = st.radio("Do you use screens before bed?", ["Yes", "No"])
-    exercise = st.selectbox("Exercise frequency:", ["None", "1-2", "3-5", "Daily"])
-    physical_activity = st.selectbox("Physical activity:", ["Walk", "Gym", "Sports", "None"])
-    home_cooked = st.radio("Eat home-cooked meals?", ["Yes", "No"])
-    water = st.selectbox("Water intake per day:", ["3-4", "5-6", "7-8", "9-10"])
-    screen_time = st.selectbox("Daily screen time (excluding work/study):", ["<2", "2-4", "5-6", "7+"])
-    multitask = st.radio("Do you often multitask on devices?", ["Yes", "No"])
+    screens_before_bed = st.radio("Do you use screens before bed?", screens_before_bed_options)
+    exercise = st.radio("Exercise frequency:", exercise_options)
+    physical_activity = st.radio("Physical activity:", activity_options)
+    home_cooked = st.radio("Eat home-cooked meals?", home_cooked_options)
+    water = st.radio("Water intake per day:", water_options)
+    screen_time = st.radio("Daily screen time (excluding work/study):", screen_time_options)
+    multitask = st.radio("Do you often multitask on devices?", multitask_options)
     breaks = st.slider("Breaks from screen (1=Low, 5=High)", 1, 5, 3)
-    self_care = st.selectbox("Self-care practices:", ["None", "Meditation", "Journaling", "Other"])
+    self_care = st.radio("Self-care practices:", selfcare_options)
 
     # =======================
-    # 4. Predict & Recommend
+    # 5. Prediction
     # =======================
     if st.button("Get Recommendations"):
         user_dict = {
@@ -115,18 +136,17 @@ if uploaded_file is not None:
 
         user_df = pd.DataFrame(user_dict)
 
-        # Encode categorical input
+        # Only encode categorical
         for col in categorical_cols:
-            if col in user_df.columns:
+            if col in user_df.columns and user_df[col].dtype == "object":
                 user_df[col] = encoder.fit_transform(user_df[col])
 
-        # Scale input
+        # Scale
         user_scaled = scaler.transform(user_df)
 
         # Predict cluster
         cluster = kmeans_final.predict(user_scaled)[0]
 
-        # Show Results
         st.subheader(f"📌 You belong to Lifestyle Cluster: {cluster}")
         st.markdown(cluster_descriptions[cluster])
         st.success("✅ Recommended Actions for You:")
@@ -134,7 +154,7 @@ if uploaded_file is not None:
             st.write("- " + rec)
 
     # =======================
-    # 5. Cluster Insights
+    # 6. Cluster Insights
     # =======================
     st.markdown("---")
     st.header("📊 Lifestyle Cluster Insights")
@@ -158,7 +178,7 @@ if uploaded_file is not None:
     ax.set_title("Cluster Lifestyle Feature Comparison")
     st.pyplot(fig)
 
-    # Cluster summaries
+    # Descriptions
     st.subheader("🔍 Cluster Descriptions")
     for cid, desc in cluster_descriptions.items():
         st.markdown(desc)
