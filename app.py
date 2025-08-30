@@ -71,9 +71,9 @@ if uploaded_file is not None:
         ]
     }
     cluster_descriptions = {
-        0: "🟢 **Cluster 0:** High Stress & Poor Sleep — Often feel overworked, use screens before bed, may lack rest.",
-        1: "🔵 **Cluster 1:** Balanced Lifestyle — Manage stress well, sleep consistently, engage in healthy routines.",
-        2: "🟠 **Cluster 2:** Moderate Issues / Screen-Heavy — Exercise sometimes, but spend long hours on screens and multitasking."
+        0: "🟢 **Cluster 0:** High Stress & Poor Sleep - Often feel overworked, use screens before bed, may lack rest.",
+        1: "🔵 **Cluster 1:** Balanced Lifestyle - Manage stress well, sleep consistently, engage in healthy routines.",
+        2: "🟠 **Cluster 2:** Moderate Issues / Screen-Heavy - Exercise sometimes, but spend long hours on screens and multitasking."
     }
 
     # =======================
