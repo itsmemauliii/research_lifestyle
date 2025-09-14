@@ -1,17 +1,19 @@
 # app.py
 import streamlit as st
 import pandas as pd
+import numpy as np
 import matplotlib.pyplot as plt
 import seaborn as sns
-import numpy as np
 from sklearn.preprocessing import LabelEncoder, StandardScaler
 from sklearn.cluster import KMeans
-from sklearn.metrics import silhouette_score
+from sklearn.impute import SimpleImputer
+from sklearn.metrics import silhouette_score, davies_bouldin_score
 
 sns.set_style("whitegrid")
+plt.rcParams.update({"font.size": 10})
 
 # -----------------------
-# Helper: safe label encoding
+# Helpers
 # -----------------------
 def safe_label_encode(le, series):
     vals = series.astype(str).fillna("NA").to_numpy()
@@ -23,36 +25,132 @@ def safe_label_encode(le, series):
 def safe_get_options(df, col):
     return sorted(df[col].dropna().unique().tolist()) if (col in df.columns and df[col].notnull().any()) else []
 
+def plot_dashboard_clean(df, save_path=None):
+    """One clean large dashboard figure (not too congested)."""
+    age_col = next((c for c in df.columns if "age" in c.lower()), None)
+    gender_col = next((c for c in df.columns if "gender" in c.lower()), None)
+    stress_col = next((c for c in df.columns if "stress" in c.lower()), None)
+    sleep_col = next((c for c in df.columns if "sleep" in c.lower()), None)
+    screen_col = next((c for c in df.columns if "screen" in c.lower()), None)
+    breaks_col = next((c for c in df.columns if "break" in c.lower()), None)
+
+    try:
+        cluster_profiles = df.groupby("Cluster").mean(numeric_only=True)
+    except Exception:
+        cluster_profiles = None
+
+    fig, axes = plt.subplots(3, 3, figsize=(18, 12))
+    axes = axes.flatten()
+
+    # 1: Cluster bar
+    sns.countplot(x="Cluster", data=df, palette="Set2", order=sorted(df["Cluster"].unique()), ax=axes[0])
+    axes[0].set_title("Cluster Distribution")
+
+    # 2: Pie
+    counts = df["Cluster"].value_counts().sort_index()
+    axes[1].pie(counts, labels=[f"C{int(i)}" for i in counts.index],
+                autopct="%1.1f%%", startangle=90,
+                colors=sns.color_palette("Set2", n_colors=len(counts)))
+    axes[1].set_title("Cluster Share (%)")
+
+    # 3: Age
+    if age_col and age_col in df.columns:
+        sns.countplot(y=age_col, data=df, order=df[age_col].value_counts().index,
+                      palette="Set2", ax=axes[2])
+        axes[2].set_title("Age Group Distribution")
+    else:
+        axes[2].axis("off")
+
+    # 4: Gender
+    if gender_col and gender_col in df.columns:
+        sns.countplot(x=gender_col, data=df, palette="Set2", ax=axes[3])
+        axes[3].set_title("Gender Distribution")
+    else:
+        axes[3].axis("off")
+
+    # 5: Stress vs sleep
+    if stress_col and sleep_col and stress_col in df.columns and sleep_col in df.columns:
+        sns.scatterplot(x=stress_col, y=sleep_col, hue="Cluster", data=df,
+                        palette="Set2", ax=axes[4], s=50, edgecolor="w")
+        axes[4].set_title("Stress vs Sleep Consistency")
+    else:
+        axes[4].axis("off")
+
+    # 6: Screen vs breaks
+    if screen_col and breaks_col and screen_col in df.columns and breaks_col in df.columns:
+        sns.scatterplot(x=screen_col, y=breaks_col, hue="Cluster", data=df,
+                        palette="Set1", ax=axes[5], s=50, edgecolor="w")
+        axes[5].set_title("Screen Time vs Breaks")
+    else:
+        axes[5].axis("off")
+
+    # 7: Heatmap large
+    for ax in axes[6:]:
+        ax.axis("off")
+    if cluster_profiles is not None and not cluster_profiles.empty:
+        sns.heatmap(cluster_profiles.T, annot=True, fmt=".2f", cmap="coolwarm",
+                    ax=axes[6], cbar_kws={"shrink":0.6})
+        axes[6].set_title("Cluster Feature Means (Heatmap)")
+
+    fig.suptitle("EDA Dashboard — Clustered Lifestyle Insights (Clean Layout)",
+                 fontsize=16, y=0.94)
+    plt.tight_layout(rect=[0, 0, 1, 0.93])
+
+    if save_path:
+        fig.savefig(save_path, dpi=300, bbox_inches="tight")
+    return fig
+
 # -----------------------
-# Streamlit setup
+# Streamlit UI
 # -----------------------
 st.set_page_config(page_title="Lifestyle Mental Health Recommender", layout="wide")
 st.title("🧠 Lifestyle-Based Mental Health Recommender System")
-st.write("Upload your survey CSV, explore compact cluster insights, and get personalized recommendations (TXT only).")
+st.write("Upload your lifestyle survey CSV, explore EDA, and get personalized recommendations (TXT only).")
 
 uploaded_file = st.file_uploader("📂 Upload your Lifestyle & Wellness Survey CSV", type=["csv"])
 
 if uploaded_file is not None:
-    # Load & clean
-    df = pd.read_csv(uploaded_file)
-    df.columns = df.columns.str.strip()
-    data = df.drop(columns=["Timestamp", "Score", "Country"], errors="ignore").copy()
+    # Load dataset
+    df_raw = pd.read_csv(uploaded_file)
+    df_raw.columns = df_raw.columns.str.strip()
 
-    # -----------------------
-    # Define numeric vs categorical
-    # -----------------------
-    numeric_cols = [
+    st.sidebar.markdown("**Dataset preview**")
+    if st.sidebar.checkbox("Show raw data (first 10 rows)"):
+        st.sidebar.dataframe(df_raw.head(10))
+
+    # Drop irrelevant
+    data = df_raw.drop(columns=["Timestamp", "Score", "Country"], errors="ignore").copy()
+
+    # Detect numeric
+    expected_numeric = [
         "How stressed do you feel due to work?",
         "On a scale of 1–5, how much control do you feel over your time?",
         "How consistent is your sleep schedule?",
-        "How often do you take breaks from screen?"
+        "How often do you take breaks from screen?",
+        "How many hours do you sleep on average?",
+        "How many hours do you spend on screen daily (excluding work/study)?"
     ]
-    numeric_cols = [c for c in numeric_cols if c in data.columns]
+    numeric_cols = [c for c in expected_numeric if c in data.columns]
+    if not numeric_cols:
+        numeric_cols = data.select_dtypes(include=[np.number]).columns.tolist()
+
     categorical_cols = [c for c in data.columns if c not in numeric_cols]
 
-    # -----------------------
-    # Encode categorical training data and keep encoders
-    # -----------------------
+    # Clean categorical
+    for col in categorical_cols:
+        data[col] = data[col].astype(str).str.strip()
+        data[col].replace({"": np.nan, "nan": np.nan, "NA": np.nan,
+                           "N/A": np.nan, "None": np.nan}, inplace=True)
+
+    # Impute
+    if numeric_cols:
+        num_imputer = SimpleImputer(strategy="median")
+        data[numeric_cols] = num_imputer.fit_transform(data[numeric_cols])
+    if categorical_cols:
+        cat_imputer = SimpleImputer(strategy="most_frequent")
+        data[categorical_cols] = cat_imputer.fit_transform(data[categorical_cols])
+
+    # Encode
     encoder_dict = {}
     data_encoded = data.copy()
     for col in categorical_cols:
@@ -61,44 +159,47 @@ if uploaded_file is not None:
         data_encoded[col] = le.fit_transform(data_encoded[col])
         encoder_dict[col] = le
 
-    # Ensure numeric columns are numeric
     for col in numeric_cols:
         data_encoded[col] = pd.to_numeric(data_encoded[col], errors="coerce").fillna(data_encoded[col].median())
 
-    # -----------------------
-    # Scale features
-    # -----------------------
+    # Scale & cluster
     scaler = StandardScaler()
     X = scaler.fit_transform(data_encoded)
 
-    # -----------------------
-    # FORCE k = 3 (user requested)
-    # -----------------------
-    chosen_k = 3
+    # ---- Sidebar option: force k=3 or custom ----
+    st.sidebar.subheader("Clustering Settings")
+    force_k = st.sidebar.checkbox("Force k = 3 (recommended for paper)", value=True)
+    if force_k:
+        chosen_k = 3
+    else:
+        chosen_k = st.sidebar.slider("Choose k", min_value=2, max_value=8, value=3)
+
     kmeans = KMeans(n_clusters=chosen_k, random_state=42, n_init=10).fit(X)
-    df["Cluster"] = kmeans.labels_
+    data["Cluster"] = kmeans.labels_
+    df = data.copy()
 
-    # -----------------------
-    # Recommendations & descriptions (customize as needed)
-    # -----------------------
+    # Metrics
+    try:
+        sil = silhouette_score(X, kmeans.labels_)
+    except Exception:
+        sil = None
+    try:
+        dbi = davies_bouldin_score(X, kmeans.labels_)
+    except Exception:
+        dbi = None
+
+    # Recommendations
     recommendations = {
-        0: [
-            "Try daily 10–15 min guided meditation and breathing exercises.",
-            "Reduce screen exposure 30–60 minutes before bed to improve sleep.",
-            "Aim for 30 minutes of physical activity most days and keep hydrated."
-        ],
-        1: [
-            "Keep maintaining routines, exercise, and social connections.",
-            "Add short mindfulness or journaling sessions to build resilience.",
-            "Monitor screen time and take frequent short breaks."
-        ],
-        2: [
-            "Use Pomodoro or scheduled breaks to reduce continuous screen time.",
-            "Introduce outdoor activity 3× per week and limit multitasking.",
-            "Practice short relaxation exercises during stressful periods."
-        ]
+        0: ["Try daily 10–15 min guided meditation.",
+            "Reduce screen exposure before bed.",
+            "Aim for 30 min of exercise most days."],
+        1: ["Maintain routines & social connections.",
+            "Add mindfulness/journaling for resilience.",
+            "Monitor screen time & take short breaks."],
+        2: ["Use Pomodoro or timed breaks.",
+            "Introduce outdoor activity 3× per week.",
+            "Practice relaxation exercises during stress."]
     }
-
     cluster_descriptions = {
         0: "🟢 Cluster 0: Higher stress & poorer sleep habits.",
         1: "🔵 Cluster 1: Balanced lifestyle with healthier routines.",
@@ -108,42 +209,37 @@ if uploaded_file is not None:
     # -----------------------
     # Sidebar navigation
     # -----------------------
-    st.sidebar.title("📌 Navigation")
-    page = st.sidebar.radio("Go to:", ["🏠 Home", "📊 Insights", "🧾 Cluster Summaries"])
+    st.sidebar.title("Navigation")
+    page = st.sidebar.radio("Go to:", ["Home", "Insights", "Cluster Summaries", "EDA Dashboard", "Findings & Metrics"])
 
-    # -----------------------
-    # HOME PAGE
-    # -----------------------
-    if page == "🏠 Home":
-        st.header("📋 Lifestyle Questionnaire (compact)")
+    # ----------------------- HOME -----------------------
+    if page == "Home":
+        st.header("📋 Lifestyle Questionnaire")
 
-        # Sliders for numeric fields
         slider_values = {}
         for col in numeric_cols:
             default = int(data[col].median()) if col in data.columns else 3
             slider_values[col] = st.slider(col + " (1=Low, 5=High)", 1, 5, default, key=f"sl_{col}")
 
-        # Categorical inputs (radio) and text for activity/self-care
         user_inputs = {}
         for col in categorical_cols:
             if "activity" in col.lower() or "self" in col.lower():
                 user_inputs[col] = st.text_input(col, key=f"txt_{col}")
             else:
-                opts = safe_get_options(df, col)
+                opts = safe_get_options(data, col)
                 if opts:
                     user_inputs[col] = st.radio(col, opts, key=f"rad_{col}")
                 else:
                     user_inputs[col] = st.text_input(col, key=f"txtfallback_{col}")
 
-        # Build user dict aligned with training data columns
         user_dict = {}
         for c in data.columns:
             if c in slider_values:
                 user_dict[c] = slider_values[c]
             elif c in user_inputs:
                 val = user_inputs[c]
-                if val == "" and safe_get_options(df, c):
-                    val = safe_get_options(df, c)[0]
+                if val == "" and safe_get_options(data, c):
+                    val = safe_get_options(data, c)[0]
                 user_dict[c] = val
             else:
                 user_dict[c] = data[c].mode().iat[0] if not data[c].isna().all() else 0
@@ -151,7 +247,6 @@ if uploaded_file is not None:
         if st.button("Get Recommendations"):
             user_df = pd.DataFrame([user_dict])
 
-            # Safe encode categoricals (extend encoders if unseen)
             user_encoded = user_df.copy()
             for col in categorical_cols:
                 if col in user_encoded.columns:
@@ -162,16 +257,13 @@ if uploaded_file is not None:
                         tmp_le = LabelEncoder()
                         user_encoded[col] = tmp_le.fit_transform(user_encoded[col].astype(str))
 
-            # Ensure numeric
             for col in numeric_cols:
                 if col in user_encoded.columns:
                     user_encoded[col] = pd.to_numeric(user_encoded[col], errors="coerce").fillna(data[col].median())
 
-            # Scale & predict
             user_scaled = scaler.transform(user_encoded)
             user_cluster = kmeans.predict(user_scaled)[0]
 
-            # Show results and TXT download
             st.subheader(f"📌 You belong to Lifestyle Cluster: {user_cluster}")
             st.markdown(cluster_descriptions.get(user_cluster, ""))
             st.success("✅ Personalized Recommendations:")
@@ -180,82 +272,88 @@ if uploaded_file is not None:
                 st.write("- " + r)
                 rec_text += "- " + r + "\n"
 
-            st.download_button("⬇️ Download Recommendations (TXT)",
-                               data=rec_text,
-                               file_name="recommendations.txt",
-                               mime="text/plain")
+            st.download_button("⬇️ Download Recommendations (TXT)", data=rec_text,
+                               file_name="recommendations.txt", mime="text/plain")
 
-    # -----------------------
-    # INSIGHTS PAGE (compact)
-    # -----------------------
-    elif page == "📊 Insights":
-        st.header("📊 Lifestyle Cluster Insights (compact)")
+    # ----------------------- INSIGHTS -----------------------
+    elif page == "Insights":
+        st.header("📊 Quick Insights")
 
-        if "Cluster" in df.columns:
-            # two small charts side-by-side
-            col1, col2 = st.columns(2)
-            with col1:
-                st.subheader("Cluster Distribution")
-                fig1, ax1 = plt.subplots(figsize=(4, 3))
-                df["Cluster"].value_counts().sort_index().plot(kind="bar", ax=ax1,
-                                                               color=sns.color_palette("Set2", n_colors=chosen_k))
-                ax1.set_xlabel("Cluster"); ax1.set_ylabel("Count")
-                st.pyplot(fig1)
-            with col2:
-                st.subheader("Cluster % Share")
-                fig2, ax2 = plt.subplots(figsize=(4, 3))
-                df["Cluster"].value_counts().plot(kind="pie", autopct="%1.1f%%", startangle=90, ax=ax2,
-                                                  colors=sns.color_palette("Set2", n_colors=chosen_k))
-                ax2.set_ylabel("")
-                st.pyplot(fig2)
+        col1, col2 = st.columns(2)
+        with col1:
+            st.subheader("Cluster Distribution")
+            fig1, ax1 = plt.subplots(figsize=(4, 3))
+            df["Cluster"].value_counts().sort_index().plot(kind="bar", ax=ax1, color=sns.color_palette("Set2", n_colors=chosen_k))
+            st.pyplot(fig1)
+        with col2:
+            st.subheader("Cluster % Share")
+            fig2, ax2 = plt.subplots(figsize=(4, 3))
+            df["Cluster"].value_counts().plot(kind="pie", autopct="%1.1f%%", startangle=90, ax=ax2, colors=sns.color_palette("Set2", n_colors=chosen_k))
+            ax2.set_ylabel("")
+            st.pyplot(fig2)
 
-            # silhouette
-            try:
-                sil = silhouette_score(X, kmeans.labels_)
-                st.info(f"Silhouette Score: **{sil:.3f}**")
-            except Exception:
-                st.warning("Silhouette score not available.")
+        if sil is not None:
+            st.info(f"Silhouette Score: {sil:.3f}")
+        if dbi is not None:
+            st.write(f"Davies–Bouldin Index: {dbi:.3f}")
 
-            # table and heatmap side-by-side
-            col3, col4 = st.columns([1, 1])
-            cluster_profiles = df.groupby("Cluster").mean(numeric_only=True)
-            with col3:
-                st.subheader("Average (numeric) per Cluster")
-                st.dataframe(cluster_profiles.style.format("{:.2f}"), height=200)
-            with col4:
-                st.subheader("Feature Heatmap")
-                fig3, ax3 = plt.subplots(figsize=(4.5, 3))
-                sns.heatmap(cluster_profiles.T, annot=True, fmt=".2f", cmap="coolwarm", ax=ax3)
-                st.pyplot(fig3)
+        cluster_profiles = df.groupby("Cluster").mean(numeric_only=True)
+        st.subheader("Cluster Profiles (numeric)")
+        st.dataframe(cluster_profiles.style.format("{:.2f}"))
 
-            # small boxplot selector
-            st.subheader("Feature distribution by cluster")
-            numeric_sel = st.selectbox("Choose numeric feature", options=list(cluster_profiles.columns), index=0)
-            fig4, ax4 = plt.subplots(figsize=(6, 3))
-            sns.boxplot(x="Cluster", y=numeric_sel, data=df, ax=ax4, palette="Set2")
-            ax4.set_title(f"{numeric_sel} by Cluster")
-            st.pyplot(fig4)
-        else:
-            st.error("Clustering not available. Check uploaded dataset.")
+    # ----------------------- EDA DASHBOARD -----------------------
+    elif page == "EDA Dashboard":
+        st.header("📈 EDA Dashboard (Clean Layout)")
+        fig = plot_dashboard_clean(df)
+        st.pyplot(fig)
+        if st.button("📥 Export Dashboard (PNG, 300 dpi)"):
+            plot_dashboard_clean(df, save_path="eda_dashboard_paper.png")
+            st.success("Saved 'eda_dashboard_paper.png'.")
 
-    # -----------------------
-    # CLUSTER SUMMARIES (compact cards)
-    # -----------------------
-    elif page == "🧾 Cluster Summaries":
-        st.header("🧾 Cluster Summaries (compact cards)")
-        if "Cluster" in df.columns:
-            counts = df["Cluster"].value_counts().sort_index()
-            unique_clusters = sorted([0,1,2])  # force display of clusters 0,1,2
-            cols = st.columns(3)
-            for i, cid in enumerate(unique_clusters):
-                with cols[i]:
-                    st.markdown(f"### Cluster {cid}")
-                    st.write(f"Count: {int(counts.get(cid,0))}")
-                    st.markdown(cluster_descriptions.get(cid, "No description available."))
-                    st.write("Top recommendations:")
-                    for rec in recommendations.get(cid, []):
-                        st.write("- " + rec)
-        else:
-            st.error("Clustering not available. Check uploaded dataset.")
+    # ----------------------- CLUSTER SUMMARIES -----------------------
+    elif page == "Cluster Summaries":
+        st.header("🧾 Cluster Summaries")
+        counts = df["Cluster"].value_counts().sort_index()
+        cols = st.columns(3)
+        for i, cid in enumerate(range(chosen_k)):
+            with cols[i % 3]:
+                st.markdown(f"### Cluster {cid}")
+                st.write(f"Count: {int(counts.get(cid,0))}")
+                st.markdown(cluster_descriptions.get(cid, "No description."))
+                st.write("Top recommendations:")
+                for rec in recommendations.get(cid, []):
+                    st.write("- " + rec)
+
+    # ----------------------- FINDINGS -----------------------
+    elif page == "Findings & Metrics":
+        st.header("📋 Findings & Metrics")
+
+        findings = [
+            ("Cluster Distribution", f"{chosen_k} clusters, imbalance seen", "Clusters 0 & 2 dominant, 1 smaller."),
+            ("Age Distribution", "Most respondents 18–28", "Dataset reflects young adults."),
+            ("Gender Distribution", "Male slightly higher", "Balanced enough for fair clustering."),
+            ("Stress vs Sleep", "High stress → poor sleep", "Cluster 0 most affected."),
+            ("Screen vs Breaks", "Cluster 0 heavy screen, few breaks", "Cluster 2 better balance."),
+            ("Cluster Profiles", "Distinct averages per cluster", "Stress, sleep & screen habits key factors.")
+        ]
+        st.table(pd.DataFrame(findings, columns=["Aspect","Observation","Interpretation"]))
+
+        st.subheader("Metrics")
+        st.write("Silhouette Score:", f"{sil:.3f}" if sil else "N/A")
+        st.write("Davies–Bouldin Index:", f"{dbi:.3f}" if dbi else "N/A")
+
+        limitations = """⚠️ Limitations:
+- Small dataset (n≈333) → low silhouette score (≈0.078), clusters overlap.
+- Results mostly reflect 18–28 age group, not older populations.
+- Clustering exploratory; more data + hybrid models can improve accuracy.
+"""
+        st.info(limitations)
+
+        findings_text = "Findings & Metrics\n\n"
+        for i, (a,o,interp) in enumerate(findings,1):
+            findings_text += f"{i}. {a}\n   - Observation: {o}\n   - Interpretation: {interp}\n\n"
+        findings_text += f"Silhouette: {sil:.3f if sil else 'N/A'}\nDB Index: {dbi:.3f if dbi else 'N/A'}\n\n{limitations}"
+        st.download_button("⬇️ Download Findings (TXT)", data=findings_text, file_name="findings.txt", mime="text/plain")
+
 else:
     st.info("⚠️ Please upload your dataset CSV to begin.")
