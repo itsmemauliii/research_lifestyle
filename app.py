@@ -11,10 +11,6 @@ from sklearn.metrics import silhouette_score
 # Helper: safe label encoding
 # -----------------------
 def safe_label_encode(le, series):
-    """
-    Safely transform a pandas Series using a fitted LabelEncoder `le`.
-    If a value is unseen, append it to le.classes_ so transform succeeds.
-    """
     vals = series.astype(str).fillna("NA").to_numpy()
     unseen = [v for v in np.unique(vals) if v not in le.classes_]
     if len(unseen) > 0:
@@ -25,26 +21,20 @@ def safe_label_encode(le, series):
 # Streamlit setup
 # -----------------------
 st.set_page_config(page_title="Lifestyle Mental Health Recommender", layout="wide")
-st.title(" Lifestyle-Based Mental Health Recommender System")
+st.title("🧠 Lifestyle-Based Mental Health Recommender System")
 st.write("Upload your survey CSV, explore cluster insights, and get personalized lifestyle recommendations.")
 
-# -----------------------
-# File uploader
-# -----------------------
-uploaded_file = st.file_uploader(" Upload your Lifestyle & Wellness Survey CSV", type=["csv"])
+uploaded_file = st.file_uploader("📂 Upload your Lifestyle & Wellness Survey CSV", type=["csv"])
 
 def safe_get_options(df, col):
     return sorted(df[col].dropna().unique().tolist()) if (col in df.columns and df[col].notnull().any()) else []
 
 if uploaded_file is not None:
-    # Load dataset
     df = pd.read_csv(uploaded_file)
     df.columns = df.columns.str.strip()
-
-    # Drop irrelevant columns
     data = df.drop(columns=["Timestamp", "Score", "Country"], errors="ignore").copy()
 
-    # Explicit numeric vs categorical
+    # Numeric & categorical
     numeric_cols = [
         "How stressed do you feel due to work?",
         "On a scale of 1–5, how much control do you feel over your time?",
@@ -63,7 +53,7 @@ if uploaded_file is not None:
         data_encoded[col] = le.fit_transform(data_encoded[col])
         encoder_dict[col] = le
 
-    # Ensure numeric columns are numeric
+    # Ensure numeric
     for col in numeric_cols:
         data_encoded[col] = pd.to_numeric(data_encoded[col], errors="coerce").fillna(data_encoded[col].median())
 
@@ -71,40 +61,32 @@ if uploaded_file is not None:
     scaler = StandardScaler()
     X = scaler.fit_transform(data_encoded)
 
-    # Choose best K (auto silhouette)
-    best_k, best_score = None, -1
-    for k in range(2, 6):
-        km = KMeans(n_clusters=k, random_state=42, n_init=10).fit(X)
-        labels = km.labels_
-        score = silhouette_score(X, labels)
-        if score > best_score:
-            best_score, best_k = score, k
-    chosen_k = best_k
+    # Auto choose k (fallback to 3 if fails)
+    chosen_k, best_score = 3, -1
+    try:
+        for k in range(2, 6):
+            km = KMeans(n_clusters=k, random_state=42, n_init=10).fit(X)
+            labels = km.labels_
+            score = silhouette_score(X, labels)
+            if score > best_score:
+                best_score, chosen_k = score, k
+    except Exception:
+        chosen_k = 3
+
+    # Final clustering
     kmeans = KMeans(n_clusters=chosen_k, random_state=42, n_init=10).fit(X)
     df["Cluster"] = kmeans.labels_
 
     # Recommendations & descriptions
     recommendations = {
-        0: [
-            "High stress levels detected: Try meditation and relaxation techniques.",
-            "Improve sleep quality by reducing screen time before bed.",
-            "Maintain hydration and try 30 minutes of daily exercise."
-        ],
-        1: [
-            "Balanced lifestyle: Keep maintaining healthy habits!",
-            "Add mindfulness or journaling to strengthen mental resilience.",
-            "Ensure social connections for better emotional health."
-        ],
-        2: [
-            "Moderate lifestyle issues detected: Reduce multitasking on devices.",
-            "Engage in outdoor physical activity at least 3 times a week.",
-            "Take frequent breaks from screens to reduce eye strain."
-        ]
+        0: ["High stress: Try meditation and relaxation.", "Reduce screen time before bed.", "Exercise & hydrate."],
+        1: ["Balanced lifestyle: Maintain habits.", "Add mindfulness/journaling.", "Ensure social connections."],
+        2: ["Reduce multitasking & screen use.", "Exercise outdoors 3× per week.", "Take frequent screen breaks."]
     }
     cluster_descriptions = {
-        0: "🟢 **Cluster 0:** High Stress & Poor Sleep - Often feel overworked, use screens before bed, may lack rest.",
-        1: "🔵 **Cluster 1:** Balanced Lifestyle - Manage stress well, sleep consistently, engage in healthy routines.",
-        2: "🟠 **Cluster 2:** Moderate Issues / Screen-Heavy - Exercise sometimes, but spend long hours on screens and multitasking."
+        0: "🟢 **Cluster 0:** High Stress & Poor Sleep.",
+        1: "🔵 **Cluster 1:** Balanced Lifestyle.",
+        2: "🟠 **Cluster 2:** Moderate Issues / Screen-Heavy."
     }
 
     # Sidebar navigation
@@ -112,18 +94,71 @@ if uploaded_file is not None:
     page = st.sidebar.radio("Go to:", ["🏠 Home", "📊 Insights", "🧾 Cluster Summaries"])
 
     # -----------------------
-    # Home Page
+    # Insights Page
+    # -----------------------
+    if page == "📊 Insights":
+        st.header("📊 Lifestyle Cluster Insights")
+
+        if "Cluster" in df.columns:
+            # Distribution
+            st.subheader("Cluster Distribution")
+            fig, ax = plt.subplots()
+            df["Cluster"].value_counts().sort_index().plot(kind="bar", ax=ax, color=sns.color_palette("Set2", n_colors=chosen_k))
+            ax.set_xlabel("Cluster")
+            ax.set_ylabel("Count")
+            st.pyplot(fig)
+
+            # Silhouette score
+            try:
+                sil = silhouette_score(X, kmeans.labels_)
+                st.write(f"Silhouette Score: **{sil:.3f}**")
+            except:
+                st.warning("Silhouette score not available.")
+
+            # Average profiles
+            st.subheader("📈 Average Lifestyle Scores per Cluster")
+            cluster_profiles = df.groupby("Cluster").mean(numeric_only=True)
+            st.dataframe(cluster_profiles)
+
+            # Heatmap
+            st.subheader("🔥 Feature Comparison")
+            fig2, ax2 = plt.subplots(figsize=(10, 4))
+            sns.heatmap(cluster_profiles.T, annot=True, fmt=".2f", cmap="coolwarm", ax=ax2)
+            st.pyplot(fig2)
+        else:
+            st.error("No clusters found. Please check dataset.")
+
+    # -----------------------
+    # Cluster Summaries Page
+    # -----------------------
+    elif page == "🧾 Cluster Summaries":
+        st.header("🔍 Cluster Summaries")
+
+        if "Cluster" in df.columns:
+            counts = df["Cluster"].value_counts().sort_index()
+            for cid in sorted(df["Cluster"].unique()):
+                st.markdown(f"### Cluster {cid} — Count: {int(counts.get(cid, 0))}")
+                st.markdown(cluster_descriptions.get(cid, f"Cluster {cid} description not available."))
+                st.write("Recommendations:")
+                for rec in recommendations.get(cid, []):
+                    st.write("- " + rec)
+                st.markdown("---")
+        else:
+            st.error("No clusters found. Please check dataset.")
+
+    # -----------------------
+    # Home Page (unchanged from before)
     # -----------------------
     if page == "🏠 Home":
         st.header("📋 Lifestyle Questionnaire")
 
-        # Numeric sliders
+        # Sliders
         slider_values = {}
         for col in numeric_cols:
             med = int(data[col].median()) if col in data.columns else 3
             slider_values[col] = st.slider(col + " (1=Low, 5=High)", 1, 5, med)
 
-        # Categorical inputs
+        # Categorical
         user_inputs = {}
         for col in categorical_cols:
             if "activity" in col.lower() or "self" in col.lower():
@@ -135,7 +170,6 @@ if uploaded_file is not None:
                 else:
                     user_inputs[col] = st.text_input(col, "")
 
-        # Combine into user dict
         user_dict = {}
         for c in data.columns:
             if c in slider_values:
@@ -151,7 +185,7 @@ if uploaded_file is not None:
         if st.button("Get Recommendations"):
             user_df = pd.DataFrame([user_dict])
 
-            # Encode categoricals safely
+            # Encode safely
             user_encoded = user_df.copy()
             for col in categorical_cols:
                 if col in user_encoded.columns:
@@ -159,71 +193,12 @@ if uploaded_file is not None:
                     if le is not None:
                         user_encoded[col] = safe_label_encode(le, user_encoded[col])
 
-            # Ensure numeric
             for col in numeric_cols:
                 if col in user_encoded.columns:
                     user_encoded[col] = pd.to_numeric(user_encoded[col], errors="coerce").fillna(data[col].median())
 
-            # Scale + predict
             user_scaled = scaler.transform(user_encoded)
             user_cluster = kmeans.predict(user_scaled)[0]
 
-            # Show results
-            st.subheader(f" You belong to Lifestyle Cluster: {user_cluster}")
-            st.markdown(cluster_descriptions.get(user_cluster, ""))
-            st.success(" Recommended Actions:")
-            rec_text = f"Lifestyle Cluster: {user_cluster}\n"
-            rec_text += cluster_descriptions.get(user_cluster, "") + "\n\nRecommendations:\n"
-            for r in recommendations.get(user_cluster, []):
-                st.write("- " + r)
-                rec_text += "- " + r + "\n"
-
-            # TXT download only
-            st.download_button("⬇ Download Recommendations (TXT)",
-                               data=rec_text,
-                               file_name="recommendations.txt",
-                               mime="text/plain")
-
-    # -----------------------
-    # Insights Page
-    # -----------------------
-    elif page == " Insights":
-        st.header(" Cluster Insights & Evaluation")
-
-        # Cluster distribution
-        fig1, ax1 = plt.subplots()
-        df["Cluster"].value_counts().sort_index().plot(kind="bar", ax=ax1, color=sns.color_palette("Set2", n_colors=chosen_k))
-        ax1.set_title("Cluster Distribution")
-        st.pyplot(fig1)
-
-        # Silhouette score
-        sil = silhouette_score(X, kmeans.labels_)
-        st.write(f"Silhouette Score: **{sil:.3f}**")
-
-        # Average profiles
-        st.subheader(" Average Lifestyle Scores per Cluster")
-        cluster_profiles = df.groupby("Cluster").mean(numeric_only=True)
-        st.dataframe(cluster_profiles)
-
-        # Heatmap
-        fig2, ax2 = plt.subplots(figsize=(10, 4))
-        sns.heatmap(cluster_profiles.T, annot=True, fmt=".2f", cmap="coolwarm", ax=ax2)
-        ax2.set_title("Feature Comparison Heatmap")
-        st.pyplot(fig2)
-
-    # -----------------------
-    # Cluster Summaries Page
-    # -----------------------
-    elif page == " Cluster Summaries":
-        st.header(" Cluster Descriptions")
-        counts = df["Cluster"].value_counts().sort_index()
-        for cid in sorted(df["Cluster"].unique()):
-            st.markdown(f"### Cluster {cid} — Count: {int(counts.get(cid, 0))}")
-            st.markdown(cluster_descriptions.get(cid, ""))
-            st.write("Recommendations:")
-            for rec in recommendations.get(cid, []):
-                st.write("- " + rec)
-            st.markdown("---")
-
-else:
-    st.info("⚠️ Please upload your dataset CSV to begin.")
+            st.subheader(f"📌 You belong to Lifestyle Cluster: {user_cluster}")
+            st.markdown(cluster_de_
