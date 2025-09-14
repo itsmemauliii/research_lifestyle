@@ -201,4 +201,19 @@ if uploaded_file is not None:
             user_cluster = kmeans.predict(user_scaled)[0]
 
             st.subheader(f"📌 You belong to Lifestyle Cluster: {user_cluster}")
-            st.markdown(cluster_de_
+            st.markdown(cluster_descriptions.get(user_cluster, ""))
+            st.success("✅ Recommended Actions:")
+
+            rec_text = f"Lifestyle Cluster: {user_cluster}\n"
+            rec_text += cluster_descriptions.get(user_cluster, "") + "\n\nRecommendations:\n"
+            for r in recommendations.get(user_cluster, []):
+                st.write("- " + r)
+                rec_text += "- " + r + "\n"
+
+            st.download_button("⬇️ Download Recommendations (TXT)",
+                               data=rec_text,
+                               file_name="recommendations.txt",
+                               mime="text/plain")
+
+else:
+    st.info("⚠️ Please upload your dataset CSV to begin.")
