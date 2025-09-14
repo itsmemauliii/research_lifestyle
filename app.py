@@ -142,6 +142,12 @@ if uploaded_file is not None:
         data[col].replace({"": np.nan, "nan": np.nan, "NA": np.nan,
                            "N/A": np.nan, "None": np.nan}, inplace=True)
 
+    # ==== FIXED: convert numeric-like columns explicitly to numeric BEFORE imputation ====
+    if numeric_cols:
+        for col in numeric_cols:
+            # coerce non-numeric to NaN so imputer can handle them
+            data[col] = pd.to_numeric(data[col], errors="coerce")
+
     # Impute
     if numeric_cols:
         num_imputer = SimpleImputer(strategy="median")
@@ -149,6 +155,12 @@ if uploaded_file is not None:
     if categorical_cols:
         cat_imputer = SimpleImputer(strategy="most_frequent")
         data[categorical_cols] = cat_imputer.fit_transform(data[categorical_cols])
+
+    # After imputation check
+    if data.isna().sum().sum() > 0:
+        st.warning("Warning: Some missing values remain after imputation. Check input file.")
+    else:
+        st.success("Data cleaned & imputed (no remaining NaNs).")
 
     # Encode
     encoder_dict = {}
@@ -180,11 +192,11 @@ if uploaded_file is not None:
 
     # Metrics
     try:
-        sil = silhouette_score(X, kmeans.labels_)
+        sil = float(silhouette_score(X, kmeans.labels_))
     except Exception:
         sil = None
     try:
-        dbi = davies_bouldin_score(X, kmeans.labels_)
+        dbi = float(davies_bouldin_score(X, kmeans.labels_))
     except Exception:
         dbi = None
 
@@ -219,7 +231,12 @@ if uploaded_file is not None:
         slider_values = {}
         for col in numeric_cols:
             default = int(data[col].median()) if col in data.columns else 3
-            slider_values[col] = st.slider(col + " (1=Low, 5=High)", 1, 5, default, key=f"sl_{col}")
+            # ensure slider bounds are valid (1-5) if data are scales; otherwise place safe bounds
+            try:
+                slider_values[col] = st.slider(col + " (1=Low, 5=High)", 1, 5, int(default), key=f"sl_{col}")
+            except Exception:
+                # fallback to a general slider
+                slider_values[col] = st.slider(col, 0, 100, int(default), key=f"sl_{col}")
 
         user_inputs = {}
         for col in categorical_cols:
@@ -293,9 +310,17 @@ if uploaded_file is not None:
             st.pyplot(fig2)
 
         if sil is not None:
-            st.info(f"Silhouette Score: {sil:.3f}")
+            if sil < 0.2:
+                st.warning(f"Silhouette Score: {sil:.3f} (low — clusters overlap; expected with small/noisy data)")
+            else:
+                st.info(f"Silhouette Score: {sil:.3f}")
+        else:
+            st.info("Silhouette Score: Not available")
+
         if dbi is not None:
             st.write(f"Davies–Bouldin Index: {dbi:.3f}")
+        else:
+            st.write("Davies–Bouldin Index: Not available")
 
         cluster_profiles = df.groupby("Cluster").mean(numeric_only=True)
         st.subheader("Cluster Profiles (numeric)")
@@ -339,8 +364,8 @@ if uploaded_file is not None:
         st.table(pd.DataFrame(findings, columns=["Aspect","Observation","Interpretation"]))
 
         st.subheader("Metrics")
-        st.write("Silhouette Score:", f"{sil:.3f}" if sil else "N/A")
-        st.write("Davies–Bouldin Index:", f"{dbi:.3f}" if dbi else "N/A")
+        st.write("Silhouette Score:", f"{sil:.3f}" if sil is not None else "N/A")
+        st.write("Davies–Bouldin Index:", f"{dbi:.3f}" if dbi is not None else "N/A")
 
         limitations = """⚠️ Limitations:
 - Small dataset (n≈333) → low silhouette score (≈0.078), clusters overlap.
@@ -349,10 +374,11 @@ if uploaded_file is not None:
 """
         st.info(limitations)
 
+        # Build findings text safely
         findings_text = "Findings & Metrics\n\n"
         for i, (a,o,interp) in enumerate(findings,1):
             findings_text += f"{i}. {a}\n   - Observation: {o}\n   - Interpretation: {interp}\n\n"
-        findings_text += f"Silhouette: {sil:.3f if sil else 'N/A'}\nDB Index: {dbi:.3f if dbi else 'N/A'}\n\n{limitations}"
+        findings_text += f"Silhouette: {sil:.3f}\nDB Index: {dbi:.3f}\n\n{limitations}" if (sil is not None and dbi is not None) else f"Silhouette: {'N/A' if sil is None else f'{sil:.3f}'}\nDB Index: {'N/A' if dbi is None else f'{dbi:.3f}'}\n\n{limitations}"
         st.download_button("⬇️ Download Findings (TXT)", data=findings_text, file_name="findings.txt", mime="text/plain")
 
 else:
