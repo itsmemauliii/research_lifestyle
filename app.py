@@ -28,11 +28,12 @@ def safe_get_options(df, col):
 # -----------------------
 st.set_page_config(page_title="Lifestyle Mental Health Recommender", layout="wide")
 st.title("🧠 Lifestyle-Based Mental Health Recommender System")
-st.write("Upload your survey CSV, explore compact cluster insights, and get personalized recommendations (TXT export).")
+st.write("Upload your survey CSV, explore compact cluster insights, and get personalized recommendations (TXT only).")
 
 uploaded_file = st.file_uploader("📂 Upload your Lifestyle & Wellness Survey CSV", type=["csv"])
 
 if uploaded_file is not None:
+    # Load & clean
     df = pd.read_csv(uploaded_file)
     df.columns = df.columns.str.strip()
     data = df.drop(columns=["Timestamp", "Score", "Country"], errors="ignore").copy()
@@ -60,27 +61,20 @@ if uploaded_file is not None:
         data_encoded[col] = le.fit_transform(data_encoded[col])
         encoder_dict[col] = le
 
-    # Ensure numeric columns numeric
+    # Ensure numeric columns are numeric
     for col in numeric_cols:
         data_encoded[col] = pd.to_numeric(data_encoded[col], errors="coerce").fillna(data_encoded[col].median())
 
     # -----------------------
-    # Scale + Cluster (auto choose k, fallback 3)
+    # Scale features
     # -----------------------
     scaler = StandardScaler()
     X = scaler.fit_transform(data_encoded)
 
-    chosen_k, best_score = 3, -1
-    try:
-        for k in range(2, 6):
-            km_tmp = KMeans(n_clusters=k, random_state=42, n_init=10).fit(X)
-            lab_tmp = km_tmp.labels_
-            sc = silhouette_score(X, lab_tmp)
-            if sc > best_score:
-                best_score, chosen_k = sc, k
-    except Exception:
-        chosen_k = 3
-
+    # -----------------------
+    # FORCE k = 3 (user requested)
+    # -----------------------
+    chosen_k = 3
     kmeans = KMeans(n_clusters=chosen_k, random_state=42, n_init=10).fit(X)
     df["Cluster"] = kmeans.labels_
 
@@ -106,7 +100,7 @@ if uploaded_file is not None:
     }
 
     cluster_descriptions = {
-        0: "🟢 Cluster 0: Higher stress & poorer sleep habits (interpret via EDA).",
+        0: "🟢 Cluster 0: Higher stress & poorer sleep habits.",
         1: "🔵 Cluster 1: Balanced lifestyle with healthier routines.",
         2: "🟠 Cluster 2: Moderate issues related to screen-heavy behavior."
     }
@@ -122,6 +116,7 @@ if uploaded_file is not None:
     # -----------------------
     if page == "🏠 Home":
         st.header("📋 Lifestyle Questionnaire (compact)")
+
         # Sliders for numeric fields
         slider_values = {}
         for col in numeric_cols:
@@ -140,7 +135,7 @@ if uploaded_file is not None:
                 else:
                     user_inputs[col] = st.text_input(col, key=f"txtfallback_{col}")
 
-        # Combine into user dict aligned with training order
+        # Build user dict aligned with training data columns
         user_dict = {}
         for c in data.columns:
             if c in slider_values:
@@ -151,7 +146,6 @@ if uploaded_file is not None:
                     val = safe_get_options(df, c)[0]
                 user_dict[c] = val
             else:
-                # fallback
                 user_dict[c] = data[c].mode().iat[0] if not data[c].isna().all() else 0
 
         if st.button("Get Recommendations"):
@@ -165,7 +159,6 @@ if uploaded_file is not None:
                     if le is not None:
                         user_encoded[col] = safe_label_encode(le, user_encoded[col])
                     else:
-                        # fallback: simple label encoding
                         tmp_le = LabelEncoder()
                         user_encoded[col] = tmp_le.fit_transform(user_encoded[col].astype(str))
 
@@ -178,7 +171,7 @@ if uploaded_file is not None:
             user_scaled = scaler.transform(user_encoded)
             user_cluster = kmeans.predict(user_scaled)[0]
 
-            # Results
+            # Show results and TXT download
             st.subheader(f"📌 You belong to Lifestyle Cluster: {user_cluster}")
             st.markdown(cluster_descriptions.get(user_cluster, ""))
             st.success("✅ Personalized Recommendations:")
@@ -187,20 +180,19 @@ if uploaded_file is not None:
                 st.write("- " + r)
                 rec_text += "- " + r + "\n"
 
-            # TXT download only
             st.download_button("⬇️ Download Recommendations (TXT)",
                                data=rec_text,
                                file_name="recommendations.txt",
                                mime="text/plain")
 
     # -----------------------
-    # INSIGHTS PAGE (compact layout)
+    # INSIGHTS PAGE (compact)
     # -----------------------
     elif page == "📊 Insights":
         st.header("📊 Lifestyle Cluster Insights (compact)")
 
         if "Cluster" in df.columns:
-            # first row: two small charts side-by-side
+            # two small charts side-by-side
             col1, col2 = st.columns(2)
             with col1:
                 st.subheader("Cluster Distribution")
@@ -209,7 +201,6 @@ if uploaded_file is not None:
                                                                color=sns.color_palette("Set2", n_colors=chosen_k))
                 ax1.set_xlabel("Cluster"); ax1.set_ylabel("Count")
                 st.pyplot(fig1)
-
             with col2:
                 st.subheader("Cluster % Share")
                 fig2, ax2 = plt.subplots(figsize=(4, 3))
@@ -225,7 +216,7 @@ if uploaded_file is not None:
             except Exception:
                 st.warning("Silhouette score not available.")
 
-            # smaller table and heatmap side-by-side
+            # table and heatmap side-by-side
             col3, col4 = st.columns([1, 1])
             cluster_profiles = df.groupby("Cluster").mean(numeric_only=True)
             with col3:
@@ -237,14 +228,13 @@ if uploaded_file is not None:
                 sns.heatmap(cluster_profiles.T, annot=True, fmt=".2f", cmap="coolwarm", ax=ax3)
                 st.pyplot(fig3)
 
-            # interactive small boxplot selector
+            # small boxplot selector
             st.subheader("Feature distribution by cluster")
             numeric_sel = st.selectbox("Choose numeric feature", options=list(cluster_profiles.columns), index=0)
             fig4, ax4 = plt.subplots(figsize=(6, 3))
             sns.boxplot(x="Cluster", y=numeric_sel, data=df, ax=ax4, palette="Set2")
             ax4.set_title(f"{numeric_sel} by Cluster")
             st.pyplot(fig4)
-
         else:
             st.error("Clustering not available. Check uploaded dataset.")
 
@@ -255,22 +245,17 @@ if uploaded_file is not None:
         st.header("🧾 Cluster Summaries (compact cards)")
         if "Cluster" in df.columns:
             counts = df["Cluster"].value_counts().sort_index()
-            unique_clusters = sorted(df["Cluster"].unique())
-            # create up to 3 columns (responsive)
-            n = len(unique_clusters)
-            cols = st.columns(min(3, n))
+            unique_clusters = sorted([0,1,2])  # force display of clusters 0,1,2
+            cols = st.columns(3)
             for i, cid in enumerate(unique_clusters):
-                c = cols[i % len(cols)]
-                with c:
+                with cols[i]:
                     st.markdown(f"### Cluster {cid}")
                     st.write(f"Count: {int(counts.get(cid,0))}")
-                    st.markdown(cluster_descriptions.get(cid, ""))
+                    st.markdown(cluster_descriptions.get(cid, "No description available."))
                     st.write("Top recommendations:")
                     for rec in recommendations.get(cid, []):
                         st.write("- " + rec)
         else:
             st.error("Clustering not available. Check uploaded dataset.")
-
 else:
     st.info("⚠️ Please upload your dataset CSV to begin.")
-
