@@ -142,23 +142,34 @@ if uploaded_file is not None:
         data[col].replace({"": np.nan, "nan": np.nan, "NA": np.nan,
                            "N/A": np.nan, "None": np.nan}, inplace=True)
 
-    # ==== FIXED: convert numeric-like columns explicitly to numeric BEFORE imputation ====
+    # ==== FIX: convert numeric-like columns explicitly to numeric BEFORE imputation ====
     if numeric_cols:
         for col in numeric_cols:
-            # coerce non-numeric to NaN so imputer can handle them
             data[col] = pd.to_numeric(data[col], errors="coerce")
 
-    # Impute
+    # ==== Robust numeric + categorical imputation and safe assignment ====
+    num_imputer = SimpleImputer(strategy="median")
+    cat_imputer = SimpleImputer(strategy="most_frequent")
+
+    # Impute numeric columns safely and reassign with proper DataFrame shape & index
     if numeric_cols:
-        num_imputer = SimpleImputer(strategy="median")
-        data[numeric_cols] = num_imputer.fit_transform(data[numeric_cols])
+        num_filled = num_imputer.fit_transform(data[numeric_cols])
+        data_numeric_df = pd.DataFrame(num_filled, columns=numeric_cols, index=data.index)
+        data[numeric_cols] = data_numeric_df
+
+    # Impute categorical columns safely and reassign with proper DataFrame shape & index
     if categorical_cols:
-        cat_imputer = SimpleImputer(strategy="most_frequent")
-        data[categorical_cols] = cat_imputer.fit_transform(data[categorical_cols])
+        # ensure string dtype for mode imputer
+        for c in categorical_cols:
+            data[c] = data[c].astype(str)
+        cat_filled = cat_imputer.fit_transform(data[categorical_cols])
+        data_cat_df = pd.DataFrame(cat_filled, columns=categorical_cols, index=data.index)
+        data[categorical_cols] = data_cat_df
 
     # After imputation check
-    if data.isna().sum().sum() > 0:
-        st.warning("Warning: Some missing values remain after imputation. Check input file.")
+    remaining_nans = int(data.isna().sum().sum())
+    if remaining_nans > 0:
+        st.warning(f"Warning: {remaining_nans} missing values remain after imputation.")
     else:
         st.success("Data cleaned & imputed (no remaining NaNs).")
 
@@ -231,11 +242,9 @@ if uploaded_file is not None:
         slider_values = {}
         for col in numeric_cols:
             default = int(data[col].median()) if col in data.columns else 3
-            # ensure slider bounds are valid (1-5) if data are scales; otherwise place safe bounds
             try:
                 slider_values[col] = st.slider(col + " (1=Low, 5=High)", 1, 5, int(default), key=f"sl_{col}")
             except Exception:
-                # fallback to a general slider
                 slider_values[col] = st.slider(col, 0, 100, int(default), key=f"sl_{col}")
 
         user_inputs = {}
